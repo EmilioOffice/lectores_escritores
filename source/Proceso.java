@@ -3,14 +3,14 @@ import java.util.Random;
 public class Proceso implements Runnable {
 
     public enum Tipo { LECTOR, ESCRITOR }
-    public enum EstadoProceso { INACTIVO, ESPERANDO, ACCEDIENDO }
+    public enum EstadoProceso { INACTIVO, ESPERANDO, ACCEDIENDO, TERMINANDO }
 
     private final int id;
     private final Tipo tipo;
     private final BaseDeDatos db;
     private volatile boolean corriendo = true;
     private final Random random = new Random();
-    private EstadoProceso estado;
+    private volatile EstadoProceso estado;
 
     public Proceso(int id, Tipo tipo, BaseDeDatos db) {
         this.id = id;
@@ -26,6 +26,8 @@ public class Proceso implements Runnable {
                 setEstado(EstadoProceso.INACTIVO);
                 Thread.sleep(random.nextInt(5000) + 3000);
 
+                if (!corriendo) break;
+
                 setEstado(EstadoProceso.ESPERANDO);
                 if (tipo == Tipo.LECTOR) {
                     db.iniciarLectura(id);
@@ -33,24 +35,33 @@ public class Proceso implements Runnable {
                     db.iniciarEscritura(id);
                 }
 
+                if (!corriendo) {
+                    if (tipo == Tipo.LECTOR) db.finalizarLectura(id);
+                    else db.finalizarEscritura();
+                    break;
+                }
+
                 setEstado(EstadoProceso.ACCEDIENDO);
                 Thread.sleep(random.nextInt(4000) + 2000);
-
-                if (tipo == Tipo.LECTOR) {
-                    db.finalizarLectura(id);
-                } else {
-                    db.finalizarEscritura();
-                }
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 corriendo = false;
+            } finally {
+                if (estado == EstadoProceso.ACCEDIENDO) {
+                    if (tipo == Tipo.LECTOR) {
+                        db.finalizarLectura(id);
+                    } else {
+                        db.finalizarEscritura();
+                    }
+                }
             }
         }
     }
 
     public void detener() {
-        corriendo = false;
+        this.estado = EstadoProceso.TERMINANDO;
+        this.corriendo = false;
     }
 
     public int getId() {
@@ -65,7 +76,9 @@ public class Proceso implements Runnable {
         return estado;
     }
 
-    private void setEstado(EstadoProceso estado) {
-        this.estado = estado;
+    private synchronized void setEstado(EstadoProceso estado) {
+        if (this.estado != EstadoProceso.TERMINANDO) {
+            this.estado = estado;
+        }
     }
 }

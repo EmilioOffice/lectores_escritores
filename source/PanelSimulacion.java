@@ -2,12 +2,13 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class PanelSimulacion extends JPanel {
 
     private final BaseDeDatos db = new BaseDeDatos();
-    private final List<Proceso> procesos = new ArrayList<>();
-    private final List<Thread> hilos = new ArrayList<>();
+    private final List<Proceso> procesos = new CopyOnWriteArrayList<>();
+    private final List<Thread> hilos = new CopyOnWriteArrayList<>();
     private int proximoId = 0;
 
     public PanelSimulacion() {
@@ -17,9 +18,18 @@ public class PanelSimulacion extends JPanel {
         JButton btnAddEscritor = new JButton("Añadir Escritor");
         btnAddEscritor.addActionListener(e -> agregarProceso(Proceso.Tipo.ESCRITOR));
 
+        JButton btnRemoveLector = new JButton("Eliminar Lector");
+        btnRemoveLector.addActionListener(e -> removerProceso(Proceso.Tipo.LECTOR));
+
+        JButton btnRemoveEscritor = new JButton("Eliminar Escritor");
+        btnRemoveEscritor.addActionListener(e -> removerProceso(Proceso.Tipo.ESCRITOR));
+
         JPanel panelDeControl = new JPanel();
         panelDeControl.add(btnAddLector);
         panelDeControl.add(btnAddEscritor);
+        panelDeControl.add(btnRemoveLector);
+        
+        panelDeControl.add(btnRemoveEscritor);
 
         setLayout(new BorderLayout());
         add(panelDeControl, BorderLayout.SOUTH);
@@ -28,16 +38,49 @@ public class PanelSimulacion extends JPanel {
         agregarProceso(Proceso.Tipo.LECTOR);
         agregarProceso(Proceso.Tipo.ESCRITOR);
         
-        Timer timer = new Timer(100, e -> repaint());
+        Timer timer = new Timer(100, e -> {
+            limpiarHilosTerminados();
+            repaint();
+        });
         timer.start();
     }
 
     private void agregarProceso(Proceso.Tipo tipo) {
         Proceso p = new Proceso(proximoId++, tipo, db);
         procesos.add(p);
-        Thread t = new Thread(p);
+        Thread t = new Thread(p, tipo.toString() + "-" + p.getId());
         hilos.add(t);
         t.start();
+    }
+    
+    private void removerProceso(Proceso.Tipo tipo) {
+        for (int i = procesos.size() - 1; i >= 0; i--) {
+            Proceso p = procesos.get(i);
+            if (p.getTipo() == tipo && p.getEstado() != Proceso.EstadoProceso.TERMINANDO) {
+                Thread t = hilos.get(i);
+                p.detener();
+                t.interrupt();
+                break;
+            }
+        }
+    }
+
+    private void limpiarHilosTerminados() {
+        List<Proceso> procesosAEliminar = new ArrayList<>();
+        List<Thread> hilosAEliminar = new ArrayList<>();
+
+        for (int i = 0; i < hilos.size(); i++) {
+            Thread t = hilos.get(i);
+            if (!t.isAlive()) {
+                procesosAEliminar.add(procesos.get(i));
+                hilosAEliminar.add(t);
+            }
+        }
+
+        if (!hilosAEliminar.isEmpty()) {
+            procesos.removeAll(procesosAEliminar);
+            hilos.removeAll(hilosAEliminar);
+        }
     }
 
     @Override
@@ -50,7 +93,6 @@ public class PanelSimulacion extends JPanel {
         int height = getHeight();
 
         dibujarBaseDeDatos(g2d, width / 2, height / 2 - 50);
-
         dibujarProcesos(g2d, width, height);
     }
 
@@ -82,12 +124,12 @@ public class PanelSimulacion extends JPanel {
     }
     
     private void dibujarProcesos(Graphics2D g2d, int width, int height) {
-        int radius = Math.min(width, height) / 2 - 100;
+        int radius = procesos.isEmpty() ? 0 : Math.min(width, height) / 2 - 100;
         int centerX = width / 2;
         int centerY = height / 2 - 50;
 
         for (int i = 0; i < procesos.size(); i++) {
-            double angle = 2 * Math.PI * i / procesos.size();
+            double angle = procesos.size() == 1 ? 0 : 2 * Math.PI * i / procesos.size();
             int x = (int) (centerX + radius * Math.cos(angle));
             int y = (int) (centerY + radius * Math.sin(angle));
             
@@ -98,6 +140,7 @@ public class PanelSimulacion extends JPanel {
                 case INACTIVO: g2d.setColor(Color.LIGHT_GRAY); break;
                 case ESPERANDO: g2d.setColor(Color.ORANGE); break;
                 case ACCEDIENDO: g2d.setColor(p.getTipo() == Proceso.Tipo.LECTOR ? Color.GREEN : Color.RED); break;
+                case TERMINANDO: g2d.setColor(Color.DARK_GRAY); break;
             }
 
             g2d.fillOval(x - 20, y - 20, 40, 40);
